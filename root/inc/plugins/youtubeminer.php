@@ -6,13 +6,7 @@ if(!defined("IN_MYBB"))
     die("Direct initialization of this file is not allowed.<br /><br />Please make sure IN_MYBB is defined.<br />");
 }
 
-$header = '<!-- Start VideoLightBox.com HEAD section -->
-        <link rel="stylesheet" href="youtube_videolb/videolightbox.css" type="text/css" />
-        
-            <link rel="stylesheet" type="text/css" href="youtube_videolb/overlay-minimal.css"/>
-            <script src="youtube_videolb/jquery.js" type="text/javascript"></script>
-            <script src="youtube_videolb/swfobject.js" type="text/javascript"></script
-<!-- End VideoLightBox.com HEAD section -->';
+$plugins->add_hook("youtubeminer_start", "youtubeminer");
 
 function youtubeminer_info()
 {
@@ -31,16 +25,25 @@ function youtubeminer_info()
 
 function youtubeminer_activate()
 {
-    global $db, $header;
+    global $db;
     
     require MYBB_ROOT."inc/adminfunctions_templates.php";
+    require_once(MYBB_ROOT."admin/inc/functions_themes.php");
+
+    $header = '<!-- Start VideoLightBox.com HEAD section -->
+        <link rel="stylesheet" href="youtube_videolb/videolightbox.css" type="text/css" />
+        <link rel="stylesheet" type="text/css" href="youtube_videolb/overlay-minimal.css"/>
+        <script src="youtube_videolb/jquery.js" type="text/javascript"></script>
+        <script src="youtube_videolb/swfobject.js" type="text/javascript"></script
+        <!-- End VideoLightBox.com HEAD section -->
+        <link rel="stylesheet" type="text/css" href="youtubeminer.css"/>';
     
     $template = array(
         "tid"        => NULL,
         "title"        => 'youtubeminer',
         "template"    => '<html>
 <head>
-<title>{\$mybb->settings[bbname]}</title>
+<title>{\$mybb->settings[bbname]} - YouTube Gallery</title>
 {\$headerinclude}
 </head>
 <body>
@@ -48,9 +51,11 @@ function youtubeminer_activate()
 <br />
 <center>
 <!-- Start VideoLightBox.com BODY section -->
-    <div class="videogallery">'
-.query_videos(0,20).
-    '</div>
+    <div class="navigation"><nav>
+<a href="{\$previousLink}" id="prev">Prev</a>
+<a href="{\$nextLink}" id="next">Next</a>
+</nav></div>
+    <div class="videogallery">{\$youtubeGallery}</div>
     <script src="youtube_videolb/jquery.tools.min.js" type="text/javascript"></script>
     <script src="youtube_videolb/videolightbox.js" type="text/javascript"></script>
     <!-- End VideoLightBox.com BODY section -->
@@ -76,36 +81,77 @@ function youtubeminer_deactivate()
     global $db, $header;
     
     require MYBB_ROOT."inc/adminfunctions_templates.php";
+
+    require_once(MYBB_ROOT."admin/inc/functions_themes.php");
     
     find_replace_templatesets("headerinclude", "#".preg_quote($header).'#', '', 0);
     
     $db->delete_query("templates", "title='youtubeminer'");
 }
 
-function query_videos($start, $length)
+function youtubeminer()
 {
-    global $db, $mybb;
-    if($mybb->settings['showrpi'] != 0)
-    {
-        $count = 0;
-        $query = $db->query("SELECT p.pid,p.subject,p.message FROM ".TABLE_PREFIX."posts p WHERE p.message LIKE \"%[video=youtube]%[/video]%\" ORDER BY p.subject LIMIT ".$start.",".$length);
-        $feed = '';
-        while($post = $db->fetch_array($query))
-        {
-            preg_match("/\\[video=youtube\\](.*?)\\[\\/video\\]/m", $post['message'], $matches);
-            if (is_array($matches) && count($matches) > 1)
-            {
-                //TODO: remove watch? from youtube link
-                $videoid = getYoutubeIdFromUrl($matches[1]);
-                if ($videoid==false) continue;
-                $videolink = 'http://youtube.com/v/'.$videoid.'?autoplay=1&rel=0&enablejsapi=1&playerapiid=ytplayer"';
-                $imagelink = 'http://img.youtube.com/vi/'.$videoid.'/default.jpg';
-                $feed .= '<a class=\"voverlay\" href="'.$videolink.' title="'.$post['subject'].'"><img src="'.$imagelink.'" alt="'.$post['subject'].'" /><span></span></a>';
-            }
-        }
+    global $db, $mybb, $templates;
 
-        return $feed;
+    $previousLink = '';
+    $nextLink = '';
+    $start = 0;
+    $length = 20;
+
+    // build navigation link
+    parse_str($_SERVER['QUERY_STRING'], $params);
+    $start = 0;
+    if (is_numeric($params['start']))
+    {
+        $start = (int)$params['start'];
     }
+
+    $next = $start + 20;
+    $previous = $start>20?($start-20):0;
+
+    $host = $_SERVER['HTTP_HOST'];
+
+    $previousLink = "http://" . $host . '/youtubeminer.php?start='.$previous;
+    $nextLink = "http://" . $host . '/youtubeminer.php?start='.$next;
+
+    if ($start==0)
+    {
+        $previousLink = '#';
+    }
+
+    //build gallery
+
+    $count = 0;
+    $query = $db->query("SELECT p.pid,p.subject,p.message FROM ".TABLE_PREFIX."posts p WHERE p.message LIKE \"%[video=youtube]%[/video]%\" ORDER BY p.subject LIMIT ".$start.",".$length);
+    $youtubeGallery = '';
+    $count = 0;
+    while($post = $db->fetch_array($query))
+    {
+        preg_match("/\\[video=youtube\\](.*?)\\[\\/video\\]/m", $post['message'], $matches);
+        if (is_array($matches) && count($matches) > 1)
+        {
+            //TODO: remove watch? from youtube link
+            $videoid = getYoutubeIdFromUrl($matches[1]);
+            if ($videoid==false) continue;
+            $videolink = 'http://youtube.com/v/'.$videoid.'?autoplay=1&rel=0&enablejsapi=1&playerapiid=ytplayer"';
+            $imagelink = 'http://img.youtube.com/vi/'.$videoid.'/default.jpg';
+            $youtubeGallery .= '<a class="voverlay" href="'.$videolink.' title="'.$post['subject'].'"><img src="'.$imagelink.'" alt="'.$post['subject'].'" /><span></span></a>';
+            $count++;
+        }
+    }
+
+    if ($count<$length)
+    {
+        $nextLink = '#';
+    }
+
+    $data = array(
+        'previousLink' => $previousLink,
+        'nextLink' => $nextLink,
+        'youtubeGallery' => $youtubeGallery
+    );
+
+    return $data;
 }
 
 /**
